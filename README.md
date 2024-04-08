@@ -1,4 +1,4 @@
-# OpenCV NeoPixel Mapping
+# IdroBot
 
 ## Hardware
 - Go to https://futuranet.it/shop/
