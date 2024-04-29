@@ -18,6 +18,7 @@
 #define DISCONNECT_AFTER_SEC    300
 #define CAPACITOR_CHARGE_MS     1500
 #define SOLENOID_IMPULSE_MS     100
+#define RTC_COMPENSATION_SEC    540
 
 //  END CONFIGURATION
 
@@ -71,6 +72,7 @@ RTC_DATA_ATTR bool irrigating1;
 RTC_DATA_ATTR bool irrigating2;
 RTC_DATA_ATTR struct tm endIrrigationTime1;
 RTC_DATA_ATTR struct tm endIrrigationTime2;
+RTC_DATA_ATTR bool rtc_need_correction;
 
 bool SomeoneConnected = false;
 
@@ -168,6 +170,7 @@ class CharacteristicCallback : public BLECharacteristicCallbacks {
         byte datetime[6];
         memcpy(datetime, pCharacteristic->getData(), sizeof(datetime));
         rtc.setTime(datetime[0], datetime[1], datetime[2], datetime[3], datetime[4], 2000 + datetime[5]);  // ss mm hh DD MM YYYY
+        rtc_need_correction = true;
         SettingsWritten(6);
         Serial.println("Set time:");for (int i=0; i<6; i++) {Serial.print(datetime[i]);Serial.print(" ");}Serial.println("");
 
@@ -220,7 +223,12 @@ void setup() {
   digitalWrite(PIN_HBRIDGE_4A, LOW);
 
 
-  RunIrrigation();
+  //  Run only if params are set
+  if(rtc.getYear() != 1970) {
+    CompensateRTCDrift();
+    RunIrrigation();
+  }
+
 
   //  If wakeup caused by user: start BLE and wait for connection, else Run irrigation
   esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
@@ -377,19 +385,51 @@ void StartBLE(std::string device_name) {
 
 
 
-void RunIrrigation() {
-
-  //  Run only if params are set
-  if(rtc.getYear() == 1970) {
-    return;
-  }
+void CompensateRTCDrift() {
 
   //  Retrieve current time
   time_t Now;
   time(&Now);
   struct tm TimeNow;
   localtime_r(&Now, &TimeNow);
+
+  Serial.println("Current time: ");
   PrintDateTime(TimeNow);
+
+  //  If it's midnight and rtc_need_correction: remove compensation from current time
+  if (rtc_need_correction == true && TimeNow.tm_hour == 0) {
+    Serial.println("Need time correction.");
+    Now -= RTC_COMPENSATION_SEC;
+    struct tm TimeCorrected;
+    localtime_r(&Now, &TimeCorrected);
+    //  Check if time hasn't go back before midnight
+    if(TimeCorrected.tm_hour == 0) {
+      rtc_need_correction = false;
+      rtc.setTimeStruct(TimeCorrected);
+      Serial.println("Time corrected: ");
+      PrintDateTime(TimeCorrected);
+    } else {
+      Serial.println("Time correction discarded.");
+    }
+  }
+
+  //  If it's one in the night: set rtc_need_correction = true
+  if(rtc_need_correction == false && TimeNow.tm_hour == 1) {
+    rtc_need_correction = true;
+  }
+  
+
+}
+
+
+
+void RunIrrigation() {
+
+  //  Retrieve current time
+  time_t Now;
+  time(&Now);
+  struct tm TimeNow;
+  localtime_r(&Now, &TimeNow);
   byte WeekDay = (TimeNow.tm_wday + 6) % 7;
 
   //  Check if it's time to start irrigating (only if battery voltage is sufficient to stop it)
