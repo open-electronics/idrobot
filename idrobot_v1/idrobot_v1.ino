@@ -266,7 +266,7 @@ void loop() {
 
 
 
-void StartBLE(std::string device_name) {
+void StartBLE(String device_name) {
 
   // Create the BLE Device
   BLEDevice::init(device_name);
